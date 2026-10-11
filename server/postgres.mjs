@@ -73,6 +73,7 @@ export async function initializeCloud(db,accounts=[]){
 export async function openPostgres(connectionString){
  if(process.env.DEMO_MODE==='true')throw new Error('Public demo credentials cannot be enabled with PostgreSQL');
  const url=new URL(connectionString);
+ if(process.env.DATABASE_PASSWORD)url.password=process.env.DATABASE_PASSWORD;
  if(!['postgres:','postgresql:'].includes(url.protocol))throw new Error('Invalid DATABASE_URL protocol');
  // Enforce certificate verification; URL options must not silently disable TLS.
  for(const key of ['sslmode','sslcert','sslkey','sslrootcert'])url.searchParams.delete(key);
