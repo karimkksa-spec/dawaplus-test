@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*credentials*
+*secrets*
+data/*.sqlite*
+data/uploads/
+mobile/*/android/
+mobile/*/www/
+*.log
