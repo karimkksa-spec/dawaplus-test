@@ -1,0 +1,41 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {PGlite} from '@electric-sql/pglite';
+import {createAdapter,initializeCloud} from '../server/postgres.mjs';
+import {createOrder,changeOrder,listOrders} from '../server/service.mjs';
+import {saveProduct,pharmacyProducts} from '../server/pharmacy.mjs';
+import {shareLocation} from '../server/location.mjs';
+test('PostgreSQL four-role workflow, images, rollback and restart initialization',async()=>{
+ const engine=new PGlite();
+ const driver={query:(sql,args)=>args?engine.query(sql,args):engine.exec(sql).then(r=>r.at(-1)||{rows:[]}),close:()=>engine.close()};
+ const db=createAdapter(driver);
+ const roles=['customer','admin','captain','pharmacy'];
+ const accounts=roles.map((role,i)=>({role,name:role,phone:'77000000'+(i+1),password:'LocalTestOnly-Strong-2026'}));
+ const [customer,admin,captain,owner]=roles.map(role=>({id:'pilot-'+role,role}));
+ try{
+  await initializeCloud(db,accounts);
+  const photo='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1S0AAAAASUVORK5CYII=';
+  const product=await saveProduct(db,owner,{name:'اختبار سحابي',category:'مستلزمات طبية',price:2000,stock:2,active:true,imageData:photo});
+  const p=(await pharmacyProducts(db,owner)).find(x=>x.id===product.id);
+  assert.ok((await db.prepare('SELECT bytes FROM uploads WHERE id=?').get(p.image.slice(9))).bytes.length>12);
+  const body={items:[{productId:p.id,quantity:1}],paymentMethod:'cash',zoneId:'mansoura',phone:'770000001',deliveryLocation:{lat:12.85,lng:44.98}};
+  const order=await createOrder(db,customer,body,'cloud-idempotency-key');
+  assert.deepEqual(await createOrder(db,customer,body,'cloud-idempotency-key'),order);
+  await assert.rejects(()=>createOrder(db,customer,{...body,items:[{productId:p.id,quantity:2}]},'cloud-no-stock'));
+  assert.equal((await db.prepare('SELECT stock FROM products WHERE id=?').get(p.id)).stock,1);
+  await assert.rejects(()=>changeOrder(db,captain,order.id,{status:'confirmed',reviewed:true}));
+  await changeOrder(db,owner,order.id,{status:'confirmed',reviewed:true});
+  await changeOrder(db,owner,order.id,{status:'ready'});
+  await changeOrder(db,admin,order.id,{status:'assigned',captainId:captain.id});
+  await shareLocation(db,captain,order.id,{lat:12.84,lng:44.99,accuracy:20,observedAt:Date.now()});
+  assert.equal((await listOrders(db,customer))[0].captain_location.lat,12.84);
+  assert.equal((await listOrders(db,owner))[0].captain_location,null);
+  await changeOrder(db,captain,order.id,{status:'picked_up'});
+  await changeOrder(db,captain,order.id,{status:'delivered',cashCollected:true});
+  await initializeCloud(db,accounts);
+  const result=(await listOrders(db,customer))[0];
+  assert.equal(result.payment_status,'collected');assert.equal(result.total,3000);assert.equal(result.captain_location,null);
+  assert.equal((await db.prepare('SELECT stock FROM products WHERE id=?').get(p.id)).stock,1);
+  assert.equal((await db.prepare('SELECT COUNT(*)::int AS n FROM uploads').get()).n,1);
+ }finally{await db.close();}
+});
