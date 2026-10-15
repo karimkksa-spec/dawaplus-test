@@ -1,3 +1,4 @@
+import {saveInfo,productDetails} from './features.mjs';
 import { randomUUID } from 'node:crypto';
 import { ensure, transaction } from './service.mjs';
 export async function ownPharmacy(db, user) {
@@ -8,7 +9,7 @@ export async function ownPharmacy(db, user) {
 }
 export async function pharmacyProducts(db, user) {
   const p = await ownPharmacy(db, user);
-  return await db.prepare('SELECT * FROM products WHERE pharmacy_id=? ORDER BY name,id').all(p.id);
+  return productDetails(db,await db.prepare('SELECT * FROM products WHERE pharmacy_id=? ORDER BY name,id').all(p.id));
 }
 export function validateProduct(body) {
   ensure(typeof body.name === 'string' && body.name.trim().length >= 2 && body.name.length <= 120, 'أدخل اسم المنتج من حرفين إلى 120 حرفًا');
@@ -49,6 +50,7 @@ export async function saveProduct(db, user, body, id = null) {
     }
     const productId = id || 'P-' + randomUUID();
     if (id) await db.prepare('UPDATE products SET name=?,category=?,price=?,stock=?,active=?,review_required=?,image=? WHERE id=? AND pharmacy_id=?').run(body.name.trim(), body.category, body.price, body.stock, Number(body.active), Number(body.category === 'الأدوية'), image, id, pharmacy.id);else await db.prepare('INSERT INTO products(id,name,category,price,stock,image,source,review_required,active,pharmacy_id) VALUES (?,?,?,?,?,?,NULL,?,?,?)').run(productId, body.name.trim(), body.category, body.price, body.stock, image, Number(body.category === 'الأدوية'), Number(body.active), pharmacy.id);
+    await saveInfo(db,productId,body);
     if(existing?.image?.startsWith('/uploads/')&&existing.image!==image)await db.prepare('DELETE FROM uploads WHERE id=?').run(existing.image.slice(9));
     return {
       id: productId

@@ -1,3 +1,4 @@
+import {featureSchema} from './features.mjs';
 import pg from 'pg';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import {openDatabase,passwordHash} from './db.mjs';
@@ -52,6 +53,7 @@ export async function initializeCloud(db,accounts=[]){
  await db.transaction(async()=>{
   await db.exec(schemaSql);
   await db.exec('SET search_path TO dawapp');
+  await db.exec(featureSchema);
   const reference=openDatabase(':memory:',false);
   try{
    for(const table of ['pharmacies','zones','products']){

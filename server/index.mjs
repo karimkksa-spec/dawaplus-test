@@ -1,3 +1,4 @@
+import {settings,saveSettings,productDetails,register,phoneNumber,routeOrder,messages,sendMessage,consultationList,consultationCreate,consultationUpdate} from './features.mjs';
 import { shareLocation } from './location.mjs';
 import http from 'node:http';
 import { paymentProviders } from './payments.mjs';
@@ -86,12 +87,13 @@ const server = http.createServer(async (req, res) => {
       currency: 'YER',
       demo,
       walletsEnabled: false,
+      operations: await settings(db),
       paymentProviders,
       pharmacies: await db.prepare('SELECT id,name FROM pharmacies WHERE active=1').all(),
       zones: await db.prepare('SELECT * FROM zones WHERE active=1').all()
     });
-    if (path === '/api/products' && req.method === 'GET') return send(await db.prepare('SELECT p.*,ph.name AS pharmacy_name FROM products p JOIN pharmacies ph ON ph.id=p.pharmacy_id WHERE p.active=1 AND ph.active=1 ORDER BY p.category,p.name').all());
-    if (path === '/api/auth/login' && req.method === 'POST') {
+    if (path === '/api/products' && req.method === 'GET') return send(await productDetails(db,await db.prepare('SELECT p.*,ph.name AS pharmacy_name FROM products p JOIN pharmacies ph ON ph.id=p.pharmacy_id WHERE p.active=1 AND ph.active=1 ORDER BY p.category,p.name').all()));
+    if (['/api/auth/login','/api/auth/register'].includes(path) && req.method === 'POST') {
       const ip = req.socket.remoteAddress;
       let limit = attempts.get(ip);
       if (!limit || limit.until < Date.now()) {
@@ -104,7 +106,8 @@ const server = http.createServer(async (req, res) => {
       ensure(++limit.n <= 20, 'محاولات كثيرة، حاول بعد عشر دقائق', 429);
       const b = await readBody(req);
       ensure(typeof b.phone === 'string' && typeof b.password === 'string' && b.password.length <= 200, 'بيانات الدخول غير صالحة');
-      const u = await db.prepare('SELECT * FROM users WHERE phone=?').get(b.phone);
+      if(path==='/api/auth/register'){await register(db,b);return send({ok:true},201);}
+      const u = await db.prepare('SELECT * FROM users WHERE phone=?').get(phoneNumber(b.phone));
       ensure(u && passwordMatches(b.password, u.password), 'رقم الهاتف أو كلمة المرور غير صحيحة', 401);
       ensure(demo || !u.id.endsWith('-demo'), 'الحساب التجريبي معطل', 403);
       const token = randomBytes(32).toString('hex');
@@ -128,6 +131,18 @@ const server = http.createServer(async (req, res) => {
         ok: true
       });
     }
+    if(path==='/api/admin/settings'){
+      const u=await admin(req);if(req.method==='GET')return send(await settings(db));if(req.method==='PATCH')return send(await saveSettings(db,u,await readBody(req)));
+    }
+    if(path==='/api/notifications'&&req.method==='GET'){const u=await session(req);return send(await db.prepare('SELECT * FROM notifications WHERE user_id=? ORDER BY created_at DESC,id DESC LIMIT 100').all(u.id));}
+    if(path==='/api/notifications/read'&&req.method==='POST'){const u=await session(req);const b=await readBody(req);ensure(Array.isArray(b.ids)&&b.ids.length<=100&&b.ids.every(x=>typeof x==='string'),'معرفات غير صالحة');await transaction(db,async()=>{for(const id of b.ids)await db.prepare('UPDATE notifications SET is_read=1 WHERE id=? AND user_id=?').run(id,u.id);});return send({ok:true});}
+    if(path==='/api/consultations'){const u=await session(req);if(req.method==='GET')return send(await consultationList(db,u));if(req.method==='POST')return send(await consultationCreate(db,u,await readBody(req)),201);}
+    const consultation=path.match(/^\/api\/consultations\/(CS-[A-F0-9]{8})$/);
+    if(consultation&&req.method==='PATCH')return send(await consultationUpdate(db,await session(req),consultation[1],await readBody(req)));
+    const routing=path.match(/^\/api\/orders\/(DP-[A-F0-9]{8})\/routing$/);
+    if(routing&&req.method==='PATCH')return send(await routeOrder(db,await session(req),routing[1],await readBody(req)));
+    const chat=path.match(/^\/api\/orders\/(DP-[A-F0-9]{8})\/messages$/);
+    if(chat){const u=await session(req);if(req.method==='GET')return send(await messages(db,u,chat[1]));if(req.method==='POST')return send(await sendMessage(db,u,chat[1],await readBody(req)),201);}
     if (path === '/api/orders' && req.method === 'GET') return send(await listOrders(db, await session(req)));
     if (path === '/api/orders' && req.method === 'POST') return send(await createOrder(db, await session(req), await readBody(req), req.headers['idempotency-key']), 201);
     const tracking = path.match(/^\/api\/orders\/(DP-[A-F0-9]{8})\/location$/);
