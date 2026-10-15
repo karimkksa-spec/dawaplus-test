@@ -87,6 +87,7 @@ test('Pharmacy creates product, sees only own orders, reviews and marks ready be
       status: 'assigned',
       captainId: captain.id
     }));
+    await changeOrder(db, owner, o.id, {status:'preparing'});
     await changeOrder(db, owner, o.id, {
       status: 'ready'
     });
@@ -101,6 +102,8 @@ test('Pharmacy creates product, sees only own orders, reviews and marks ready be
     await changeOrder(db, captain, o.id, {
       status: 'picked_up'
     });
+    await changeOrder(db,captain,o.id,{status:'on_the_way'});
+    await changeOrder(db,captain,o.id,{status:'arrived'});
     await changeOrder(db, captain, o.id, {
       status: 'delivered',
       cashCollected: true

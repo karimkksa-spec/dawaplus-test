@@ -62,6 +62,7 @@ test('Server pricing, reservation, idempotency and full delivery workflow', asyn
       status: 'confirmed',
       reviewed: true
     });
+    await changeOrder(db, admin, o.id, {status:'preparing'});
     await changeOrder(db, admin, o.id, {
       status: 'ready'
     });
@@ -75,6 +76,8 @@ test('Server pricing, reservation, idempotency and full delivery workflow', asyn
     await assert.rejects(async () => await changeOrder(db, captain, o.id, {
       status: 'delivered'
     }));
+    await changeOrder(db,captain,o.id,{status:'on_the_way'});
+    await changeOrder(db,captain,o.id,{status:'arrived'});
     await changeOrder(db, captain, o.id, {
       status: 'delivered',
       cashCollected: true

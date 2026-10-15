@@ -25,12 +25,15 @@ test('PostgreSQL four-role workflow, images, rollback and restart initialization
   assert.equal((await db.prepare('SELECT stock FROM products WHERE id=?').get(p.id)).stock,1);
   await assert.rejects(()=>changeOrder(db,captain,order.id,{status:'confirmed',reviewed:true}));
   await changeOrder(db,owner,order.id,{status:'confirmed',reviewed:true});
+  await changeOrder(db,owner,order.id,{status:'preparing'});
   await changeOrder(db,owner,order.id,{status:'ready'});
   await changeOrder(db,admin,order.id,{status:'assigned',captainId:captain.id});
   await shareLocation(db,captain,order.id,{lat:12.84,lng:44.99,accuracy:20,observedAt:Date.now()});
   assert.equal((await listOrders(db,customer))[0].captain_location.lat,12.84);
   assert.equal((await listOrders(db,owner))[0].captain_location,null);
   await changeOrder(db,captain,order.id,{status:'picked_up'});
+  await changeOrder(db,captain,order.id,{status:'on_the_way'});
+  await changeOrder(db,captain,order.id,{status:'arrived'});
   await changeOrder(db,captain,order.id,{status:'delivered',cashCollected:true});
   await initializeCloud(db,accounts);
   const result=(await listOrders(db,customer))[0];

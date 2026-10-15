@@ -74,6 +74,20 @@ test('HTTP authentication, role boundaries, bad credentials and malformed input'
     assert.equal((await request('/orders', {
       headers
     })).status, 401);
+    const json={'Content-Type':'application/json'};
+    const registered=await request('/auth/register',{method:'POST',headers:json,body:JSON.stringify({name:'عميل اختبار HTTP',phone:'+967771234560',password:'HttpTestOnly!2026',role:'admin'})});
+    assert.equal(registered.status,201);
+    const login=await request('/auth/login',{method:'POST',headers:json,body:JSON.stringify({phone:'771234560',password:'HttpTestOnly!2026'})});
+    const account=await login.json();assert.equal(account.user.role,'customer');
+    const newHeaders={...json,Authorization:'Bearer '+account.token};
+    assert.equal((await request('/admin/settings',{headers:newHeaders})).status,403);
+    assert.equal((await request('/admin/settings',{method:'PATCH',headers:newHeaders,body:JSON.stringify({routing:'auto'})})).status,403);
+    const inbox=await (await request('/notifications',{headers:newHeaders})).json();assert.equal(inbox.length,1);assert.equal(inbox[0].is_read,0);
+    assert.equal((await request('/notifications/read',{method:'POST',headers:newHeaders,body:JSON.stringify({ids:[inbox[0].id]})})).status,200);
+    assert.equal((await (await request('/notifications',{headers:newHeaders})).json())[0].is_read,1);
+    assert.equal((await request('/orders/DP-00000000/messages',{headers:newHeaders})).status,403);
+    assert.equal((await request('/consultations',{method:'POST',headers:newHeaders,body:JSON.stringify({clientKey:'http-disabled-doctor'})})).status,409);
+    const products=await (await request('/products')).json();assert.ok('description' in products[0]);assert.ok('catalog_key' in products[0]);
   } finally {
     child.kill();
     await new Promise(resolve => {
