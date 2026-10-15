@@ -44,7 +44,7 @@ export function LocationPicker({value,onChange}){
 }
 function CaptainSharing({order,api}){
  const [sharing,setSharing]=useState(false),[message,setMessage]=useState(''),watch=useRef(null),generation=useRef(0),last=useRef(0),queue=useRef(Promise.resolve());
- const active=['assigned','picked_up'].includes(order.status);
+ const active=['assigned','picked_up','on_the_way','arrived'].includes(order.status);
  function send(body){const result=queue.current.catch(()=>{}).then(()=>api('/orders/'+order.id+'/location',{method:'POST',body:JSON.stringify(body)}));queue.current=result;return result;}
  function stop(silent=false){generation.current++;if(watch.current!==null){navigator.geolocation.clearWatch(watch.current);watch.current=null;send({action:'stop'}).catch(()=>{if(!silent)setMessage('تعذر إرسال إيقاف المشاركة. ستظهر آخر نقطة كموقع قديم خلال دقيقة.');});}if(!silent){setSharing(false);setMessage('توقفت مشاركة الموقع.');}}
  useEffect(()=>{if(!active)stop();return()=>stop(true);},[active,order.id]);
