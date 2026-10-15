@@ -45,6 +45,7 @@ async function assign(db, id) {
     status: 'confirmed',
     reviewed: true
   });
+  await changeOrder(db, admin, id, {status:'preparing'});
   await changeOrder(db, admin, id, {
     status: 'ready'
   });
@@ -173,6 +174,8 @@ test('Tracking rejects invalid or stale fixes and clears when delivered or cance
         await changeOrder(db, captain, id, {
           status: 'picked_up'
         });
+        await changeOrder(db,captain,id,{status:'on_the_way'});
+        await changeOrder(db,captain,id,{status:'arrived'});
         await changeOrder(db, captain, id, {
           status: terminal,
           cashCollected: true

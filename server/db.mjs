@@ -1,3 +1,4 @@
+import {featureSchema} from './features.mjs';
 import { upgradePharmacies } from './migrate.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, mkdirSync, existsSync } from 'node:fs';
@@ -19,6 +20,7 @@ export function openDatabase(path=resolve(root,'data/dawaplus.sqlite'),demo=fals
  CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY,order_id TEXT NOT NULL REFERENCES orders(id),actor_id TEXT NOT NULL REFERENCES users(id),status TEXT NOT NULL,created_at TEXT NOT NULL);
  `);
  upgradePharmacies(db);
+ db.exec(featureSchema);
  db.exec('CREATE TABLE IF NOT EXISTS uploads(id TEXT PRIMARY KEY,mime TEXT NOT NULL,bytes BLOB NOT NULL)');
  if(!db.prepare('SELECT count(*) AS n FROM products').get().n){
   const rows=JSON.parse(readFileSync(resolve(root,'data/reference-catalog.json'),'utf8')); const seen=new Set();

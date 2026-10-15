@@ -1,3 +1,4 @@
+import {initializeDispatch,acceptDispatch,notifyOrder,labels,fulfillment,candidates} from './features.mjs';
 import { deliveryPoint } from './location.mjs';
 import { randomUUID } from 'node:crypto';
 import {transaction} from './transaction.mjs';
@@ -12,12 +13,23 @@ export function ensure(condition, message, status = 400) {
   if (!condition) throw new ApiError(status, message);
 }
 export async function listOrders(db, user) {
-  const where = user.role === 'admin' ? '1=1' : user.role === 'captain' ? 'captain_id=?' : user.role === 'pharmacy' ? 'pharmacy_id=(SELECT id FROM pharmacies WHERE owner_id=?)' : 'customer_id=?';
-  const rows = await db.prepare(`SELECT * FROM orders WHERE ${where} ORDER BY created_at DESC`).all(...(user.role === 'admin' ? [] : [user.id]));
-  for (const o of rows) {
-    o.captain_location = user.role === 'pharmacy' ? null : (await db.prepare('SELECT lat,lng,accuracy,observed_at,received_at FROM order_locations WHERE order_id=?').get(o.id)) || null;
-    o.items = await db.prepare('SELECT * FROM order_items WHERE order_id=?').all(o.id);
-    o.events = await db.prepare('SELECT status,created_at FROM events WHERE order_id=? ORDER BY id').all(o.id);
+  let rows;
+  if(user.role==='pharmacy'){
+    const ph=await db.prepare('SELECT id FROM pharmacies WHERE owner_id=? AND active=1').get(user.id);
+    if(!ph)return [];
+    rows=await db.prepare("SELECT o.* FROM orders o LEFT JOIN order_dispatch d ON d.order_id=o.id WHERE o.pharmacy_id=? OR (o.status='pending' AND d.mode='auto' AND d.accepted=0) ORDER BY o.created_at DESC").all(ph.id);
+    const visible=[];
+    for(const o of rows){const d=await db.prepare('SELECT * FROM order_dispatch WHERE order_id=?').get(o.id);if(o.status==='pending'&&d?.mode==='auto'){if(!await fulfillment(db,o,ph.id))continue;o.is_offer=true;o.phone='';o.address='';o.note='';o.delivery_lat=null;o.delivery_lng=null;o.customer_id=null;}visible.push(o);}rows=visible;
+  }else{
+    const where=user.role==='admin'?'1=1':user.role==='captain'?'captain_id=?':'customer_id=?';
+    rows=await db.prepare(`SELECT * FROM orders WHERE ${where} ORDER BY created_at DESC`).all(...(user.role==='admin'?[]:[user.id]));
+  }
+  for(const o of rows){
+    o.dispatch=await db.prepare('SELECT mode,accepted FROM order_dispatch WHERE order_id=?').get(o.id)||{mode:'manual',accepted:o.status==='pending'?0:1};
+    o.captain_location=user.role==='pharmacy'?null:(await db.prepare('SELECT lat,lng,accuracy,observed_at,received_at FROM order_locations WHERE order_id=?').get(o.id))||null;
+    o.items=await db.prepare('SELECT * FROM order_items WHERE order_id=?').all(o.id);
+    o.events=await db.prepare('SELECT status,created_at FROM events WHERE order_id=? ORDER BY id').all(o.id);
+    if(user.role==='admin'&&o.status==='pending')o.candidates=(await candidates(db,o)).map(p=>({id:p.id,name:p.name}));
   }
   return rows;
 }
@@ -62,6 +74,7 @@ export async function createOrder(db, user, body, key) {
       await db.prepare('UPDATE products SET stock=stock-? WHERE id=?').run(p.quantity, p.id);
     }
     await db.prepare('INSERT INTO events(order_id,actor_id,status,created_at) VALUES (?,?,?,?)').run(id, user.id, 'pending', now);
+    await initializeDispatch(db,id);
     return {
       id
     };
@@ -75,16 +88,33 @@ export async function changeOrder(db, user, id, body) {
     let captain = o.captain_id;
     const transitions = {
       pending: ['confirmed', 'cancelled'],
-      confirmed: ['ready', 'cancelled'],
+      confirmed: ['preparing', 'cancelled'],
+      preparing: ['ready','cancelled'],
       ready: ['assigned', 'cancelled'],
       assigned: ['picked_up', 'cancelled'],
-      picked_up: ['delivered'],
+      picked_up: ['on_the_way'],
+      on_the_way: ['arrived'],
+      arrived: ['delivered'],
       delivered: [],
       cancelled: []
     };
     ensure(transitions[o.status]?.includes(status), 'لا يمكن الانتقال إلى هذه الحالة', 409);
-    if (user.role === 'customer') ensure(o.customer_id === user.id && o.status === 'pending' && status === 'cancelled', 'لا تملك صلاحية تعديل الطلب', 403);else if (user.role === 'captain') ensure(o.captain_id === user.id && ['picked_up', 'delivered'].includes(status), 'لا تملك صلاحية تعديل الطلب', 403);else if (user.role === 'pharmacy') ensure((await db.prepare('SELECT id FROM pharmacies WHERE id=? AND owner_id=?').get(o.pharmacy_id, user.id)) && ['confirmed', 'ready', 'cancelled'].includes(status) && ['pending', 'confirmed'].includes(o.status), 'لا تملك صلاحية تعديل هذا الطلب', 403);else ensure(user.role === 'admin', 'غير مصرح', 403);
-    if (status === 'confirmed') ensure(body.reviewed === true, 'يجب مراجعة المنتجات ومتطلبات الوصفة أولًا');
+    if(user.role==='customer')ensure(o.customer_id===user.id&&o.status==='pending'&&status==='cancelled','لا تملك صلاحية تعديل الطلب',403);
+    else if(user.role==='captain')ensure(o.captain_id===user.id&&['picked_up','on_the_way','arrived','delivered'].includes(status),'لا تملك صلاحية تعديل الطلب',403);
+    else if(user.role==='pharmacy'){
+      if(status!=='confirmed'){
+        const d=await db.prepare('SELECT mode FROM order_dispatch WHERE order_id=?').get(id);
+        ensure(!(o.status==='pending'&&d?.mode==='auto'),'لا يمكن إلغاء عرض متاح لصيدليات أخرى',403);
+        ensure(await db.prepare('SELECT id FROM pharmacies WHERE id=? AND owner_id=? AND active=1').get(o.pharmacy_id,user.id),'غير مصرح',403);
+      }
+      ensure(['confirmed','preparing','ready','cancelled'].includes(status)&&['pending','confirmed','preparing'].includes(o.status),'غير مصرح',403);
+    }else ensure(user.role==='admin','غير مصرح',403);
+    if(status==='confirmed'){
+      ensure(body.reviewed===true,'يجب تأكيد توفر جميع الأصناف ومراجعة متطلبات الوصفة');
+      const d=await db.prepare('SELECT mode FROM order_dispatch WHERE order_id=?').get(id);
+      if(user.role==='pharmacy'&&d?.mode!=='auto')ensure(await db.prepare('SELECT id FROM pharmacies WHERE id=? AND owner_id=? AND active=1').get(o.pharmacy_id,user.id),'غير مصرح',403);
+      await acceptDispatch(db,user,o);
+    }
     if (status === 'assigned') {
       ensure(user.role === 'admin', 'الإسناد متاح للإدارة فقط', 403);
       const c = await db.prepare("SELECT id FROM users WHERE id=? AND role='captain'").get(String(body.captainId));
@@ -96,6 +126,7 @@ export async function changeOrder(db, user, id, body) {
     if (['delivered', 'cancelled'].includes(status)) await db.prepare('DELETE FROM order_locations WHERE order_id=?').run(id);
     await db.prepare('UPDATE orders SET status=?,captain_id=?,payment_status=? WHERE id=?').run(status, captain, status === 'delivered' ? 'collected' : o.payment_status, id);
     await db.prepare('INSERT INTO events(order_id,actor_id,status,created_at) VALUES (?,?,?,?)').run(id, user.id, status, new Date().toISOString());
+    await notifyOrder(db,id,labels[status]+' — '+id);
     return {
       id,
       status

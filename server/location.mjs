@@ -19,7 +19,7 @@ export async function shareLocation(db, user, id, body) {
       ok: true
     };
   }
-  ensure(['assigned', 'picked_up'].includes(o.status), 'التتبع متاح أثناء مهمة التوصيل فقط', 409);
+  ensure(['assigned', 'picked_up', 'on_the_way', 'arrived'].includes(o.status), 'التتبع متاح أثناء مهمة التوصيل فقط', 409);
   ensure(validPoint(body), 'إحداثيات الموقع غير صالحة');
   ensure(Number.isFinite(body.accuracy) && body.accuracy >= 0 && body.accuracy <= 10000, 'دقة الموقع غير صالحة');
   const now = Date.now();
