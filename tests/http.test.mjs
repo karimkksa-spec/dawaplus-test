@@ -75,6 +75,11 @@ test('HTTP authentication, role boundaries, bad credentials and malformed input'
       headers
     })).status, 401);
     const json={'Content-Type':'application/json'};
+    const ad=await (await request('/auth/login',{method:'POST',headers:json,body:JSON.stringify({phone:'770000002',password:'DawaDemo2026!'})})).json();
+    const provision=await request('/admin/accounts',{method:'POST',headers:{...json,Authorization:'Bearer '+ad.token},body:JSON.stringify({pharmacyName:'صيدلية HTTP',employeeName:'موظف HTTP',phone:'772222222',kind:'pharmacy',active:true})});assert.equal(provision.status,201);const creds=await provision.json();
+    const staff=await (await request('/auth/login',{method:'POST',headers:json,body:JSON.stringify({phone:creds.username,password:creds.password})})).json();assert.equal(staff.user.role,'pharmacy');const sh={...json,Authorization:'Bearer '+staff.token};assert.deepEqual(await (await request('/pharmacy/products',{headers:sh})).json(),[]);
+    await request('/admin/accounts/'+creds.id,{method:'PATCH',headers:{...json,Authorization:'Bearer '+ad.token},body:JSON.stringify({pharmacyName:'صيدلية HTTP',employeeName:'موظف HTTP',phone:'772222222',kind:'pharmacy',active:false})});assert.equal((await request('/pharmacy/products',{headers:sh})).status,401);
+
     const registered=await request('/auth/register',{method:'POST',headers:json,body:JSON.stringify({name:'عميل اختبار HTTP',phone:'+967771234560',password:'HttpTestOnly!2026',role:'admin'})});
     assert.equal(registered.status,201);
     const login=await request('/auth/login',{method:'POST',headers:json,body:JSON.stringify({phone:'771234560',password:'HttpTestOnly!2026'})});
@@ -88,6 +93,10 @@ test('HTTP authentication, role boundaries, bad credentials and malformed input'
     assert.equal((await request('/orders/DP-00000000/messages',{headers:newHeaders})).status,403);
     assert.equal((await request('/consultations',{method:'POST',headers:newHeaders,body:JSON.stringify({clientKey:'http-disabled-doctor'})})).status,409);
     const products=await (await request('/products')).json();assert.ok('description' in products[0]);assert.ok('catalog_key' in products[0]);
+    const guest=await (await request('/guest/session',{method:'POST',headers:json,body:JSON.stringify({phone:'771234560'})})).json();const gh={...json,Authorization:'Bearer '+guest.token};assert.equal((await (await request('/auth/me',{headers:gh})).json()).guest,true);
+    const guestOrder=await request('/orders',{method:'POST',headers:{...gh,'Idempotency-Key':'http-guest-order'},body:JSON.stringify({items:[{productId:products[0].id,quantity:1}],phone:'771234560',zoneId:'mansoura',deliveryLocation:{lat:12.85,lng:44.98},paymentMethod:'cash'})});assert.equal(guestOrder.status,201);
+    const claimed=await request('/guest/claim',{method:'POST',headers:newHeaders,body:JSON.stringify({guestToken:guest.token})});assert.equal(claimed.status,200);assert.equal((await claimed.json()).linked,1);assert.equal((await request('/orders',{headers:gh})).status,401);assert.equal((await (await request('/orders',{headers:newHeaders})).json()).length,1);
+
   } finally {
     child.kill();
     await new Promise(resolve => {
