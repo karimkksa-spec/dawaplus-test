@@ -1,9 +1,11 @@
+import {categoryNames} from './content.mjs';
+import {pharmacyScope} from './accounts.mjs';
 import {saveInfo,productDetails} from './features.mjs';
 import { randomUUID } from 'node:crypto';
 import { ensure, transaction } from './service.mjs';
 export async function ownPharmacy(db, user) {
   ensure(user.role === 'pharmacy', 'هذه الخدمة لصاحب الصيدلية فقط', 403);
-  const p = await db.prepare('SELECT id,name FROM pharmacies WHERE owner_id=? AND active=1').get(user.id);
+  const p = await db.prepare(pharmacyScope).get(user.id,user.id);
   ensure(p, 'لا توجد صيدلية مفعلة لهذا الحساب', 403);
   return p;
 }
@@ -13,7 +15,7 @@ export async function pharmacyProducts(db, user) {
 }
 export function validateProduct(body) {
   ensure(typeof body.name === 'string' && body.name.trim().length >= 2 && body.name.length <= 120, 'أدخل اسم المنتج من حرفين إلى 120 حرفًا');
-  ensure(['الأدوية', 'العناية بالشعر', 'العناية الشخصية', 'مستلزمات طبية', 'الأم والطفل'].includes(body.category), 'اختر قسمًا صالحًا');
+  ensure(categoryNames.includes(body.category), 'اختر قسمًا صالحًا');
   ensure(Number.isInteger(body.price) && body.price >= 0 && body.price <= 100000000, 'أدخل سعرًا صحيحًا');
   ensure(Number.isInteger(body.stock) && body.stock >= 0 && body.stock <= 100000, 'أدخل مخزونًا صحيحًا');
   ensure(typeof body.active === 'boolean', 'حالة عرض المنتج غير صالحة');

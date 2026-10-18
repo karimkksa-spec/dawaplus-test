@@ -1,3 +1,6 @@
+import {guestSession,claimGuest} from './guest.mjs';
+import {content,saveContent} from './content.mjs';
+import {accountList,saveAccount,enabledAccount} from './accounts.mjs';
 import {settings,saveSettings,productDetails,register,phoneNumber,routeOrder,messages,sendMessage,consultationList,consultationCreate,consultationUpdate} from './features.mjs';
 import { shareLocation } from './location.mjs';
 import http from 'node:http';
@@ -19,7 +22,7 @@ async function readBody(req) {
   let s = '';
   for await (const chunk of req) {
     s += chunk;
-    ensure(s.length <= (req.url.startsWith('/api/pharmacy/products') ? 1500000 : 32768), 'الطلب أكبر من الحد المسموح', 413);
+    ensure(s.length <= ((req.url.startsWith('/api/pharmacy/products')||req.url.startsWith('/api/admin/content')) ? 26000000 : 32768), 'الطلب أكبر من الحد المسموح', 413);
   }
   try {
     return JSON.parse(s || '{}');
@@ -33,6 +36,8 @@ async function session(req) {
   const u = await db.prepare('SELECT u.id,u.name,u.role,u.phone FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>?').get(hash(token), Date.now());
   ensure(u, 'انتهت جلسة الدخول', 401);
   ensure(demo || !u.id.endsWith('-demo'), 'الحساب التجريبي معطل', 403);
+  await enabledAccount(db,u.id);
+  const guest=await db.prepare('SELECT phone FROM guest_access WHERE user_id=? AND claimed_by IS NULL').get(u.id);if(guest){u.guest=true;u.phone=guest.phone;}
   return u;
 }
 async function admin(req) {
@@ -88,12 +93,13 @@ const server = http.createServer(async (req, res) => {
       demo,
       walletsEnabled: false,
       operations: await settings(db),
+      content:await content(db),
       paymentProviders,
       pharmacies: await db.prepare('SELECT id,name FROM pharmacies WHERE active=1').all(),
       zones: await db.prepare('SELECT * FROM zones WHERE active=1').all()
     });
     if (path === '/api/products' && req.method === 'GET') return send(await productDetails(db,await db.prepare('SELECT p.*,ph.name AS pharmacy_name FROM products p JOIN pharmacies ph ON ph.id=p.pharmacy_id WHERE p.active=1 AND ph.active=1 ORDER BY p.category,p.name').all()));
-    if (['/api/auth/login','/api/auth/register'].includes(path) && req.method === 'POST') {
+    if (['/api/auth/login','/api/auth/register','/api/guest/session'].includes(path) && req.method === 'POST') {
       const ip = req.socket.remoteAddress;
       let limit = attempts.get(ip);
       if (!limit || limit.until < Date.now()) {
@@ -105,11 +111,13 @@ const server = http.createServer(async (req, res) => {
       }
       ensure(++limit.n <= 20, 'محاولات كثيرة، حاول بعد عشر دقائق', 429);
       const b = await readBody(req);
+      if(path==='/api/guest/session')return send(await guestSession(db,b),201);
       ensure(typeof b.phone === 'string' && typeof b.password === 'string' && b.password.length <= 200, 'بيانات الدخول غير صالحة');
       if(path==='/api/auth/register'){await register(db,b);return send({ok:true},201);}
-      const u = await db.prepare('SELECT * FROM users WHERE phone=?').get(phoneNumber(b.phone));
+      const u = b.phone.startsWith('dp-')?await db.prepare('SELECT u.* FROM users u JOIN pharmacy_accounts a ON a.user_id=u.id WHERE a.username=?').get(b.phone.trim()):await db.prepare('SELECT * FROM users WHERE phone=?').get(phoneNumber(b.phone));
       ensure(u && passwordMatches(b.password, u.password), 'رقم الهاتف أو كلمة المرور غير صحيحة', 401);
       ensure(demo || !u.id.endsWith('-demo'), 'الحساب التجريبي معطل', 403);
+      await enabledAccount(db,u.id);
       const token = randomBytes(32).toString('hex');
       await db.prepare('DELETE FROM sessions WHERE expires<?').run(Date.now());
       await db.prepare('INSERT INTO sessions VALUES (?,?,?)').run(hash(token), u.id, Date.now() + 8 * 3600000);
@@ -123,6 +131,7 @@ const server = http.createServer(async (req, res) => {
         }
       });
     }
+    if(path==='/api/guest/claim'&&req.method==='POST')return send(await claimGuest(db,await session(req),await readBody(req)));
     if (path === '/api/auth/me') return send(await session(req));
     if (path === '/api/auth/logout' && req.method === 'POST') {
       await session(req);
@@ -131,6 +140,9 @@ const server = http.createServer(async (req, res) => {
         ok: true
       });
     }
+    if(path==='/api/admin/content'){const u=await admin(req);if(req.method==='GET')return send(await content(db));if(req.method==='PATCH')return send(await saveContent(db,u,await readBody(req)));}
+    if(path==='/api/admin/accounts'){const u=await admin(req);if(req.method==='GET')return send(await accountList(db,u));if(req.method==='POST')return send(await saveAccount(db,u,await readBody(req)),201);}
+    const account=path.match(/^\/api\/admin\/accounts\/(staff-[a-f0-9-]+)$/);if(account&&req.method==='PATCH')return send(await saveAccount(db,await admin(req),await readBody(req),account[1]));
     if(path==='/api/admin/settings'){
       const u=await admin(req);if(req.method==='GET')return send(await settings(db));if(req.method==='PATCH')return send(await saveSettings(db,u,await readBody(req)));
     }
