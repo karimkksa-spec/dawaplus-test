@@ -1,3 +1,4 @@
+import {pharmacyScope} from './accounts.mjs';
 import {initializeDispatch,acceptDispatch,notifyOrder,labels,fulfillment,candidates} from './features.mjs';
 import { deliveryPoint } from './location.mjs';
 import { randomUUID } from 'node:crypto';
@@ -15,7 +16,7 @@ export function ensure(condition, message, status = 400) {
 export async function listOrders(db, user) {
   let rows;
   if(user.role==='pharmacy'){
-    const ph=await db.prepare('SELECT id FROM pharmacies WHERE owner_id=? AND active=1').get(user.id);
+    const ph=await db.prepare(pharmacyScope).get(user.id,user.id);
     if(!ph)return [];
     rows=await db.prepare("SELECT o.* FROM orders o LEFT JOIN order_dispatch d ON d.order_id=o.id WHERE o.pharmacy_id=? OR (o.status='pending' AND d.mode='auto' AND d.accepted=0) ORDER BY o.created_at DESC").all(ph.id);
     const visible=[];
@@ -105,14 +106,14 @@ export async function changeOrder(db, user, id, body) {
       if(status!=='confirmed'){
         const d=await db.prepare('SELECT mode FROM order_dispatch WHERE order_id=?').get(id);
         ensure(!(o.status==='pending'&&d?.mode==='auto'),'لا يمكن إلغاء عرض متاح لصيدليات أخرى',403);
-        ensure(await db.prepare('SELECT id FROM pharmacies WHERE id=? AND owner_id=? AND active=1').get(o.pharmacy_id,user.id),'غير مصرح',403);
+        ensure((await db.prepare(pharmacyScope).get(user.id,user.id))?.id===o.pharmacy_id,'غير مصرح',403);
       }
       ensure(['confirmed','preparing','ready','cancelled'].includes(status)&&['pending','confirmed','preparing'].includes(o.status),'غير مصرح',403);
     }else ensure(user.role==='admin','غير مصرح',403);
     if(status==='confirmed'){
       ensure(body.reviewed===true,'يجب تأكيد توفر جميع الأصناف ومراجعة متطلبات الوصفة');
       const d=await db.prepare('SELECT mode FROM order_dispatch WHERE order_id=?').get(id);
-      if(user.role==='pharmacy'&&d?.mode!=='auto')ensure(await db.prepare('SELECT id FROM pharmacies WHERE id=? AND owner_id=? AND active=1').get(o.pharmacy_id,user.id),'غير مصرح',403);
+      if(user.role==='pharmacy'&&d?.mode!=='auto')ensure((await db.prepare(pharmacyScope).get(user.id,user.id))?.id===o.pharmacy_id,'غير مصرح',403);
       await acceptDispatch(db,user,o);
     }
     if (status === 'assigned') {
