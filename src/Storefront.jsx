@@ -1,5 +1,5 @@
 import React,{useState,useRef} from 'react';
-import {ArrowRight,ArrowLeft,ShoppingBag,Heart,LayoutGrid,RefreshCw,Package,Truck} from 'lucide-react';
+import {ArrowRight,ArrowLeft,ShoppingBag,Heart,LayoutGrid,RefreshCw,Package} from 'lucide-react';
 import {AdSlider} from './Content.jsx';
 import {availableGroups,productGroup} from './catalog-groups.mjs';
 import './storefront.css';
@@ -15,12 +15,18 @@ const categoryCopy={
 };
 const asset=(path,base)=>path?.startsWith('/')?base+path:path;
 
-function Banner({category,products,image,onBrowse}) {
-  const copy=categoryCopy[category]||['صيدليتك، أقرب إليك','منتجات الدواء والعناية، وتوصيل داخل عدن.'];
-  const photo=products[0]?.image||image;
-  return <section className={'shop-banner '+(category==='الكل'?'shop-banner-home':'')} aria-label={category==='الكل'?'بانر دواء بلس':'بانر '+category}>
-    <div className="shop-banner-copy"><span>{category==='الكل'?'دواء بلس · عدن':category}</span><h2>{copy[0]}</h2><p>{copy[1]}</p><button onClick={onBrowse}>تسوّق الآن <ArrowLeft size={16}/></button></div>
-    <div className="shop-banner-art" aria-hidden="true"><span className="banner-cross">+</span>{photo?<img src={photo} alt=""/>:<ShoppingBag/>}<span className="banner-delivery"><Truck size={15}/> إلى بابك</span></div>
+function categoryPhoto(category, base) {
+  const path = category?.image;
+  const preset = /^\/categories\/([0-6])\.svg$/.exec(path || '');
+  return preset ? '/store-art/' + preset[1] + '.webp' : asset(path, base);
+}
+
+function Banner({category,image,onBrowse}) {
+  const home = category === 'الكل';
+  const copy = categoryCopy[category] || ['صيدليتك، أقرب إليك','منتجات الدواء والعناية، وتوصيل داخل عدن.'];
+  return <section className="shop-banner photo-banner" aria-label={home ? 'بانر دواء بلس' : category}>
+    <div className="shop-banner-copy"><h2>{copy[0]}</h2><p>{copy[1]}</p><button onClick={onBrowse}>تسوّق الآن <ArrowLeft size={16}/></button></div>
+    <img className="shop-banner-photo" src={image || '/store-art/home.webp'} alt=""/>
   </section>;
 }
 
@@ -40,8 +46,8 @@ export default function Storefront({config,products,query,setQuery,category,setC
   function pointerMove(e){const d=drag.current;if(!d?.active)return;const delta=e.clientX-d.x;if(Math.abs(delta)>5){d.moved=true;rail.current.setPointerCapture(e.pointerId);rail.current.scrollLeft=d.scroll-delta;}}
   return <div className="storefront">
     {!isHome&&<div className="shop-page-title"><button className="shop-back" aria-label="العودة إلى كل التصنيفات" onClick={()=>choose('الكل')}><ArrowRight/></button><h1>{view==='favorites'?'المفضلة':query?'نتائج البحث':category}</h1></div>}
-    {view!=='favorites'&&!query&&(isHome&&config.content?.ads?.length?<AdSlider ads={config.content.ads.map(a=>({...a,image:asset(a.image,apiBase)}))}/>:<Banner category={category} products={scoped} image={asset(selected?.image,apiBase)} onBrowse={browse}/>)}
-    {isHome&&<section className="shop-categories" aria-label="التصنيفات"><div className="shop-section-title"><h2><LayoutGrid size={20}/> التصنيفات</h2><span>كل ما تحتاجه</span></div><div className="shop-category-grid">{categories.map(c=>{const photo=products.find(p=>p.category===c.name)?.image||asset(c.image,apiBase);return <button key={c.name} onClick={()=>choose(c.name)}><span className="shop-category-image"><img src={photo} alt=""/></span><span>{c.name}</span><ArrowLeft size={14}/></button>;})}</div></section>}
+    {view!=='favorites'&&!query&&(isHome&&config.content?.ads?.length?<AdSlider ads={config.content.ads.map(a=>({...a,image:asset(a.image,apiBase)}))}/>:<Banner category={category} image={categoryPhoto(selected,apiBase)} onBrowse={browse}/>)}
+    {isHome&&<section className="shop-categories" aria-label="التصنيفات"><div className="shop-section-title"><h2><LayoutGrid size={20}/> التصنيفات</h2></div><div className="shop-category-grid">{categories.map(c=>{const photo=categoryPhoto(c,apiBase);return <button key={c.name} onClick={()=>choose(c.name)}><span className="shop-category-image"><img src={photo} alt=""/></span><span>{c.name}</span><ArrowLeft size={14}/></button>;})}</div></section>}
     {!isHome&&view!=='favorites'&&<nav className="shop-category-switch" aria-label="تغيير الفئة">{categories.map(c=><button key={c.name} aria-pressed={category===c.name} className={category===c.name?'active':''} onClick={()=>choose(c.name)}>{c.name}</button>)}</nav>}
     {category!=='الكل'&&view!=='favorites'&&<nav className="shop-subcategories" aria-label={'تقسيمات '+category} ref={rail} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={()=>{if(drag.current)drag.current.active=false;}} onPointerCancel={()=>{drag.current=null;}} onLostPointerCapture={()=>{if(drag.current)drag.current.active=false;}} onClickCapture={e=>{if(drag.current?.moved){e.preventDefault();e.stopPropagation();drag.current=null;}}}>
       {['الكل',...groups].map(name=><button key={name} aria-pressed={selectedGroup===name} className={selectedGroup===name?'active':''} onClick={()=>setGroup(name)}><Package size={16}/>{name}</button>)}
