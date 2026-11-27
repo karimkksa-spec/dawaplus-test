@@ -1,3 +1,4 @@
+import {randomBytes} from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -96,6 +97,38 @@ test('HTTP authentication, role boundaries, bad credentials and malformed input'
     const guest=await (await request('/guest/session',{method:'POST',headers:json,body:JSON.stringify({phone:'771234560'})})).json();const gh={...json,Authorization:'Bearer '+guest.token};assert.equal((await (await request('/auth/me',{headers:gh})).json()).guest,true);
     const guestOrder=await request('/orders',{method:'POST',headers:{...gh,'Idempotency-Key':'http-guest-order'},body:JSON.stringify({items:[{productId:products[0].id,quantity:1}],phone:'771234560',zoneId:'mansoura',deliveryLocation:{lat:12.85,lng:44.98},paymentMethod:'cash'})});assert.equal(guestOrder.status,201);
     const claimed=await request('/guest/claim',{method:'POST',headers:newHeaders,body:JSON.stringify({guestToken:guest.token})});assert.equal(claimed.status,200);assert.equal((await claimed.json()).linked,1);assert.equal((await request('/orders',{headers:gh})).status,401);assert.equal((await (await request('/orders',{headers:newHeaders})).json()).length,1);
+
+    const adminHeaders={...json,Authorization:'Bearer '+ad.token};
+    assert.equal((await request('/admin/partner-applications',{headers:newHeaders})).status,403);
+    assert.equal((await request('/admin/captain-accounts',{headers:newHeaders})).status,403);
+    for (const [i,role] of ['captain','pharmacy'].entries()) {
+      const candidate={role,name:'شريك HTTP',phone:'77222223'+i,password:randomBytes(18).toString('hex'),zoneId:'mansoura',pharmacyName:'صيدلية الانضمام',address:'شارع الاختبار'};
+      const post=(path,body)=>request(path,{method:'POST',headers:json,body:JSON.stringify(body)});
+      const submitted=await post('/partners/apply',candidate);
+      assert.equal(submitted.status,201);
+      const {id}=await submitted.json();
+      const loginBody={phone:candidate.phone,password:candidate.password,portal:role};
+      const waiting=await post('/auth/login',loginBody);
+      assert.equal(waiting.status,403);
+      assert.equal((await waiting.json()).token,undefined);
+      assert.equal((await (await post('/partners/status',candidate)).json()).status,'pending');
+      const decision={method:'PATCH',headers:newHeaders,body:JSON.stringify({status:'approved'})};
+      assert.equal((await request('/admin/partner-applications/'+id,decision)).status,403);
+      assert.equal((await request('/admin/partner-applications/'+id,{...decision,headers:adminHeaders})).status,200);
+      const approved=await post('/auth/login',loginBody);
+      assert.equal(approved.status,200);
+      const partner=await approved.json();
+      assert.equal(partner.user.role,role);
+      const ph={...json,Authorization:'Bearer '+partner.token};
+      assert.equal((await request(role==='captain'?'/orders':'/pharmacy/products',{headers:ph})).status,200);
+      assert.equal((await request('/admin/partner-applications',{headers:ph})).status,403);
+      if (role==='captain') {
+        const assignable=await (await request('/admin/captains',{headers:adminHeaders})).json();
+        assert.ok(assignable.some(row=>row.id===partner.user.id));
+        assert.equal((await request('/admin/captain-accounts/'+partner.user.id,{method:'PATCH',headers:adminHeaders,body:JSON.stringify({active:false})})).status,200);
+        assert.equal((await request('/orders',{headers:ph})).status,401);
+      }
+    }
 
   } finally {
     child.kill();

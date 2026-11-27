@@ -1,3 +1,4 @@
+import { availableCaptains } from './partners.mjs';
 import {pharmacyScope} from './accounts.mjs';
 import {initializeDispatch,acceptDispatch,notifyOrder,labels,fulfillment,candidates} from './features.mjs';
 import { deliveryPoint } from './location.mjs';
@@ -118,7 +119,7 @@ export async function changeOrder(db, user, id, body) {
     }
     if (status === 'assigned') {
       ensure(user.role === 'admin', 'الإسناد متاح للإدارة فقط', 403);
-      const c = await db.prepare("SELECT id FROM users WHERE id=? AND role='captain'").get(String(body.captainId));
+      const c = await db.prepare(availableCaptains + " AND u.id=?").get(String(body.captainId));
       ensure(c, 'الكابتن غير صالح');
       captain = c.id;
     }

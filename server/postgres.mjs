@@ -1,5 +1,6 @@
+import { partnerSchema } from './partners.mjs';
 import {guestSchema} from './guest.mjs';
-import {accountSchema} from './accounts.mjs';
+import {accountSchema,enrollExistingOwners} from './accounts.mjs';
 import {featureSchema} from './features.mjs';
 import pg from 'pg';
 import {AsyncLocalStorage} from 'node:async_hooks';
@@ -58,6 +59,7 @@ export async function initializeCloud(db,accounts=[]){
   await db.exec(featureSchema);
  await db.exec(accountSchema);
  await db.exec(guestSchema);
+ await db.exec(partnerSchema);
   const reference=openDatabase(':memory:',false);
   try{
    for(const table of ['pharmacies','zones','products']){
@@ -73,6 +75,7 @@ export async function initializeCloud(db,accounts=[]){
    await db.prepare('INSERT INTO users VALUES (?,?,?,?,?) ON CONFLICT(id) DO NOTHING').run(id,account.name,account.phone,account.role,passwordHash(account.password));
    if(account.role==='pharmacy')await db.prepare("UPDATE pharmacies SET owner_id=? WHERE id='pharmacy-main' AND owner_id IS NULL").run(id);
   }
+  await db.exec(enrollExistingOwners);
  });
 }
 

@@ -1,3 +1,4 @@
+import { requestPartnership, applicationStatus, applications, reviewApplication, availableCaptains, captainAccounts, manageCaptain } from './partners.mjs';
 import {guestSession,claimGuest} from './guest.mjs';
 import {content,saveContent} from './content.mjs';
 import {accountList,saveAccount,enabledAccount} from './accounts.mjs';
@@ -99,8 +100,8 @@ const server = http.createServer(async (req, res) => {
       zones: await db.prepare('SELECT * FROM zones WHERE active=1').all()
     });
     if (path === '/api/products' && req.method === 'GET') return send(await productDetails(db,await db.prepare('SELECT p.*,ph.name AS pharmacy_name FROM products p JOIN pharmacies ph ON ph.id=p.pharmacy_id WHERE p.active=1 AND ph.active=1 ORDER BY p.category,p.name').all()));
-    if (['/api/auth/login','/api/auth/register','/api/guest/session'].includes(path) && req.method === 'POST') {
-      const ip = req.socket.remoteAddress;
+    if (['/api/auth/login','/api/auth/register','/api/guest/session','/api/partners/apply','/api/partners/status'].includes(path) && req.method === 'POST') {
+      const ip = req.socket.remoteAddress + (path.startsWith('/api/partners/') ? ':partners' : ':auth');
       let limit = attempts.get(ip);
       if (!limit || limit.until < Date.now()) {
         limit = {
@@ -111,11 +112,19 @@ const server = http.createServer(async (req, res) => {
       }
       ensure(++limit.n <= 20, 'محاولات كثيرة، حاول بعد عشر دقائق', 429);
       const b = await readBody(req);
+      if(path==='/api/partners/apply')return send(await requestPartnership(db,b),201);
+      if(path==='/api/partners/status')return send(await applicationStatus(db,b));
       if(path==='/api/guest/session')return send(await guestSession(db,b),201);
       ensure(typeof b.phone === 'string' && typeof b.password === 'string' && b.password.length <= 200, 'بيانات الدخول غير صالحة');
       if(path==='/api/auth/register'){await register(db,b);return send({ok:true},201);}
       const u = b.phone.startsWith('dp-')?await db.prepare('SELECT u.* FROM users u JOIN pharmacy_accounts a ON a.user_id=u.id WHERE a.username=?').get(b.phone.trim()):await db.prepare('SELECT * FROM users WHERE phone=?').get(phoneNumber(b.phone));
+      if (!u && ['captain','pharmacy'].includes(b.portal) && !b.phone.startsWith('dp-')) {
+        const request = await applicationStatus(db, {role:b.portal,phone:b.phone,password:b.password});
+        if (request.status === 'pending') ensure(false, 'طلب انضمامك قيد المراجعة. يتاح تسجيل الدخول بعد موافقة الإدارة', 403);
+        if (request.status === 'rejected') ensure(false, 'رُفض طلب الانضمام. السبب: ' + request.reason, 403);
+      }
       ensure(u && passwordMatches(b.password, u.password), 'رقم الهاتف أو كلمة المرور غير صحيحة', 401);
+      ensure(!b.portal || u.role === b.portal, 'هذا الحساب مخصص لبوابة أخرى', 403);
       ensure(demo || !u.id.endsWith('-demo'), 'الحساب التجريبي معطل', 403);
       await enabledAccount(db,u.id);
       const token = randomBytes(32).toString('hex');
@@ -141,8 +150,21 @@ const server = http.createServer(async (req, res) => {
       });
     }
     if(path==='/api/admin/content'){const u=await admin(req);if(req.method==='GET')return send(await content(db));if(req.method==='PATCH')return send(await saveContent(db,u,await readBody(req)));}
+    if (path === '/api/admin/partner-applications' && req.method === 'GET')
+      return send(await applications(db, await admin(req)));
+    const review = path.match(/^\/api\/admin\/partner-applications\/(JOIN-[a-f0-9-]+)$/);
+    if (review && req.method === 'PATCH')
+      return send(await reviewApplication(db, await admin(req), review[1], await readBody(req)));
+    if (path === '/api/admin/captain-accounts') {
+      const reviewer = await admin(req);
+      if (req.method === 'GET') return send(await captainAccounts(db, reviewer));
+      if (req.method === 'POST') return send(await manageCaptain(db, reviewer, null, await readBody(req)), 201);
+    }
+    const captainAccount = path.match(/^\/api\/admin\/captain-accounts\/([A-Za-z0-9-]+)$/);
+    if (captainAccount && req.method === 'PATCH')
+      return send(await manageCaptain(db, await admin(req), captainAccount[1], await readBody(req)));
     if(path==='/api/admin/accounts'){const u=await admin(req);if(req.method==='GET')return send(await accountList(db,u));if(req.method==='POST')return send(await saveAccount(db,u,await readBody(req)),201);}
-    const account=path.match(/^\/api\/admin\/accounts\/(staff-[a-f0-9-]+)$/);if(account&&req.method==='PATCH')return send(await saveAccount(db,await admin(req),await readBody(req),account[1]));
+    const account=path.match(/^\/api\/admin\/accounts\/([A-Za-z0-9-]+)$/);if(account&&req.method==='PATCH')return send(await saveAccount(db,await admin(req),await readBody(req),account[1]));
     if(path==='/api/admin/settings'){
       const u=await admin(req);if(req.method==='GET')return send(await settings(db));if(req.method==='PATCH')return send(await saveSettings(db,u,await readBody(req)));
     }
@@ -168,7 +190,7 @@ const server = http.createServer(async (req, res) => {
     if (ownProduct && req.method === 'PATCH') return send(await saveProduct(db, await session(req), await readBody(req), ownProduct[1]));
     if (path === '/api/admin/captains') {
       await admin(req);
-      return send(await db.prepare("SELECT id,name,phone FROM users WHERE role='captain'").all());
+      return send(await db.prepare(availableCaptains + ' ORDER BY u.name,u.id').all());
     }
     const product = path.match(/^\/api\/admin\/products\/([A-Za-z0-9-]+)$/);
     if (product && req.method === 'PATCH') {

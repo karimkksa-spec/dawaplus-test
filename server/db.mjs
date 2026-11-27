@@ -1,5 +1,6 @@
+import { partnerSchema } from './partners.mjs';
 import {guestSchema} from './guest.mjs';
-import {accountSchema} from './accounts.mjs';
+import {accountSchema,enrollExistingOwners} from './accounts.mjs';
 import {featureSchema} from './features.mjs';
 import { upgradePharmacies } from './migrate.mjs';
 import { DatabaseSync } from 'node:sqlite';
@@ -25,6 +26,7 @@ export function openDatabase(path=resolve(root,'data/dawaplus.sqlite'),demo=fals
  db.exec(featureSchema);
  db.exec(accountSchema);
  db.exec(guestSchema);
+ db.exec(partnerSchema);
  db.exec('CREATE TABLE IF NOT EXISTS uploads(id TEXT PRIMARY KEY,mime TEXT NOT NULL,bytes BLOB NOT NULL)');
  if(!db.prepare('SELECT count(*) AS n FROM products').get().n){
   const rows=JSON.parse(readFileSync(resolve(root,'data/reference-catalog.json'),'utf8')); const seen=new Set();
@@ -41,5 +43,6 @@ export function openDatabase(path=resolve(root,'data/dawaplus.sqlite'),demo=fals
  if(demo){db.prepare("UPDATE pharmacies SET owner_id='pharmacy-demo' WHERE id='pharmacy-main'").run();db.prepare("INSERT OR IGNORE INTO pharmacies(id,name,owner_id) VALUES ('pharmacy-second','الصيدلية الثانية التجريبية','pharmacy-two-demo')").run();}
  const assetManifest=resolve(root,'data/local-assets.json');
  if(existsSync(assetManifest)){for(const [id,image] of Object.entries(JSON.parse(readFileSync(assetManifest,'utf8'))))db.prepare("UPDATE products SET image=? WHERE id=? AND (image LIKE 'https://appaccs.yrbso.app/%' OR image IS NULL)").run(image,id);}
+ db.exec(enrollExistingOwners);
  return db;
 }
