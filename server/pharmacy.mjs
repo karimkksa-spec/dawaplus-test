@@ -33,6 +33,25 @@ export function decodeImage(data) {
     extension: m[1] === 'jpeg' ? 'jpg' : m[1]
   };
 }
+async function storePhoto(db, data) {
+  const decoded = decodeImage(data);
+  const file = randomUUID() + '.' + decoded.extension;
+  await db.prepare('INSERT INTO uploads(id,mime,bytes) VALUES (?,?,?)').run(file,decoded.extension==='jpg'?'image/jpeg':'image/'+decoded.extension,decoded.bytes);
+  return '/uploads/' + file;
+}
+
+export async function saveProductPhoto(db,user,id,imageData) {
+  return transaction(db,async()=>{
+    const pharmacy=await ownPharmacy(db,user);
+    const product=await db.prepare('SELECT image FROM products WHERE id=? AND pharmacy_id=?').get(id,pharmacy.id);
+    ensure(product,'المنتج غير موجود في صيدليتك',404);
+    const image=await storePhoto(db,imageData);
+    await db.prepare('UPDATE products SET image=? WHERE id=? AND pharmacy_id=?').run(image,id,pharmacy.id);
+    if(product.image?.startsWith('/uploads/'))await db.prepare('DELETE FROM uploads WHERE id=?').run(product.image.slice(9));
+    return {id,image};
+  });
+}
+
 export async function saveProduct(db, user, body, id = null) {
   return await transaction(db, async () => {
     const pharmacy = await ownPharmacy(db, user);
@@ -44,12 +63,7 @@ export async function saveProduct(db, user, body, id = null) {
       ensure(Number.isInteger(body.expectedStock) && body.expectedStock === existing.stock, 'تغيّر المخزون منذ فتح المنتج. أغلق النموذج وأعد فتحه لمراجعة الكمية الحالية.', 409);
     }
     let image = existing?.image || '/product-placeholder.svg';
-    if (body.imageData) {
-      const decoded = decodeImage(body.imageData),
-        name = randomUUID() + '.' + decoded.extension;
-      await db.prepare('INSERT INTO uploads(id,mime,bytes) VALUES (?,?,?)').run(name,decoded.extension==='jpg'?'image/jpeg':'image/'+decoded.extension,decoded.bytes);
-      image = '/uploads/' + name;
-    }
+    if (body.imageData) image = await storePhoto(db,body.imageData);
     const productId = id || 'P-' + randomUUID();
     if (id) await db.prepare('UPDATE products SET name=?,category=?,price=?,stock=?,active=?,review_required=?,image=? WHERE id=? AND pharmacy_id=?').run(body.name.trim(), body.category, body.price, body.stock, Number(body.active), Number(body.category === 'الأدوية'), image, id, pharmacy.id);else await db.prepare('INSERT INTO products(id,name,category,price,stock,image,source,review_required,active,pharmacy_id) VALUES (?,?,?,?,?,?,NULL,?,?,?)').run(productId, body.name.trim(), body.category, body.price, body.stock, image, Number(body.category === 'الأدوية'), Number(body.active), pharmacy.id);
     await saveInfo(db,productId,body);

@@ -1,4 +1,5 @@
 import {randomBytes} from 'node:crypto';
+import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -120,6 +121,26 @@ test('HTTP authentication, role boundaries, bad credentials and malformed input'
       const partner=await approved.json();
       assert.equal(partner.user.role,role);
       const ph={...json,Authorization:'Bearer '+partner.token};
+      const xlsx='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      const workbook=await readFile(new URL('./fixtures/pharmacy-valid.xlsx',import.meta.url));
+      const sheet=(action,headers)=>request('/pharmacy/products/import/'+action,{method:'POST',headers:{...headers,'Content-Type':xlsx},body:workbook});
+      if(role==='captain'){
+        assert.equal((await sheet('confirm',ph)).status,403);
+        assert.equal((await sheet('preview',{})).status,401);
+      } else {
+        assert.equal((await (await sheet('preview',ph)).json()).rows.length,3);
+        assert.deepEqual(await (await sheet('confirm',ph)).json(),{added:2,skipped:1});
+        const items=await (await request('/pharmacy/products',{headers:ph})).json();
+        const imported=items.find(p=>p.price===1500);
+        assert.equal(imported.image,'/product-placeholder.svg');
+        const imageData='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1S0AAAAASUVORK5CYII=';
+        const picture=await request('/pharmacy/products/'+imported.id+'/photo',{method:'PATCH',headers:ph,body:JSON.stringify({imageData})});
+        assert.equal(picture.status,200);
+        const asset=await fetch('http://127.0.0.1:4186'+(await picture.json()).image);
+        assert.equal(asset.headers.get('content-type'),'image/png');
+        assert.deepEqual(Buffer.from(await asset.arrayBuffer()),Buffer.from(imageData.split(',')[1],'base64'));
+        assert.deepEqual(await (await sheet('confirm',ph)).json(),{added:0,skipped:3});
+      }
       assert.equal((await request(role==='captain'?'/orders':'/pharmacy/products',{headers:ph})).status,200);
       assert.equal((await request('/admin/partner-applications',{headers:ph})).status,403);
       if (role==='captain') {

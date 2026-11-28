@@ -21,7 +21,16 @@ export async function admins(db){return (await db.prepare("SELECT id FROM users 
 export async function notifyOrder(db,id,title){const o=await db.prepare('SELECT * FROM orders WHERE id=?').get(id);const p=await db.prepare('SELECT owner_id FROM pharmacies WHERE id=?').get(o.pharmacy_id);await notifyUsers(db,[o.customer_id,o.captain_id,p?.owner_id,...(await db.prepare('SELECT user_id FROM pharmacy_accounts WHERE pharmacy_id=? AND active=1').all(o.pharmacy_id)).map(a=>a.user_id),...await admins(db)],title,id);}
 export function phoneNumber(value){ensure(typeof value==='string','رقم هاتف غير صالح');const p=value.trim().replace(/^\+?967/,'');ensure(/^7\d{8}$/.test(p),'أدخل رقم هاتف يمني صحيح');return p;}
 export async function register(db,b){const phone=phoneNumber(b.phone);ensure(typeof b.name==='string'&&b.name.trim().length>=2&&b.name.length<=80,'أدخل اسمك');ensure(typeof b.password==='string'&&b.password.length>=10&&b.password.length<=128,'كلمة المرور من 10 إلى 128 حرفًا');const hashed=passwordHash(b.password);return transaction(db,async()=>{ensure(!await db.prepare('SELECT id FROM users WHERE phone=?').get(phone),'الرقم مسجل، استخدم تسجيل الدخول',409);const id='customer-'+randomUUID();await db.prepare('INSERT INTO users VALUES (?,?,?,?,?)').run(id,b.name.trim(),phone,'customer',hashed);await notifyUsers(db,[id],'أهلًا بك في دواء بلس','account');return {id,name:b.name.trim(),phone,role:'customer'};});}
-export async function productDetails(db,products){for(const p of products){const info=await db.prepare('SELECT * FROM product_info WHERE product_id=?').get(p.id);Object.assign(p,{catalog_key:p.id,description:'',usage:'',dosage:'',warnings:'',reference:''},info||{});}return products;}
+export async function productDetails(db,products) {
+  for(let i=0;i<products.length;i+=300) {
+    const batch=products.slice(i,i+300);
+    const ids=batch.map(p=>p.id);
+    const rows=await db.prepare('SELECT * FROM product_info WHERE product_id IN ('+ids.map(()=>'?').join(',')+')').all(...ids);
+    const info=new Map(rows.map(row=>[row.product_id,row]));
+    for(const p of batch)Object.assign(p,{catalog_key:p.id,description:'',usage:'',dosage:'',warnings:'',reference:''},info.get(p.id));
+  }
+  return products;
+}
 export async function saveInfo(db,id,b){const fields=['description','usage','dosage','warnings','reference'];const previous=await db.prepare('SELECT * FROM product_info WHERE product_id=?').get(id);const values=fields.map(k=>b[k]??previous?.[k]??'');values.forEach(v=>ensure(typeof v==='string'&&v.length<=3000,'النص طويل أو غير صالح'));const key=b.catalog_key||previous?.catalog_key||id;ensure(typeof key==='string'&&/^[A-Za-z0-9-]{1,100}$/.test(key),'معرف الصنف الموحد غير صالح');ensure(!values[2]||values[4].trim(),'أضف مصدر الجرعة أو النشرة المعتمدة');await db.prepare('INSERT INTO product_info VALUES (?,?,?,?,?,?,?) ON CONFLICT(product_id) DO UPDATE SET catalog_key=excluded.catalog_key,description=excluded.description,usage=excluded.usage,dosage=excluded.dosage,warnings=excluded.warnings,reference=excluded.reference').run(id,key,...values);}
 
 // Only identical catalogue identity, name and agreed price can be fulfilled by another pharmacy.

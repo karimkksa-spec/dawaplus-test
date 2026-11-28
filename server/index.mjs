@@ -1,4 +1,6 @@
 import { requestPartnership, applicationStatus, applications, reviewApplication, availableCaptains, captainAccounts, manageCaptain } from './partners.mjs';
+import { importProducts } from './product-import.mjs';
+import { readWorkbookBody } from './product-sheet.mjs';
 import {guestSession,claimGuest} from './guest.mjs';
 import {content,saveContent} from './content.mjs';
 import {accountList,saveAccount,enabledAccount} from './accounts.mjs';
@@ -6,7 +8,7 @@ import {settings,saveSettings,productDetails,register,phoneNumber,routeOrder,mes
 import { shareLocation } from './location.mjs';
 import http from 'node:http';
 import { paymentProviders } from './payments.mjs';
-import { ownPharmacy, pharmacyProducts, saveProduct } from './pharmacy.mjs';
+import { ownPharmacy, pharmacyProducts, saveProduct, saveProductPhoto } from './pharmacy.mjs';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
 import { randomBytes, createHash } from 'node:crypto';
@@ -55,6 +57,7 @@ const mime = {
   '.jpg': 'image/jpeg',
   '.webp': 'image/webp',
   '.svg': 'image/svg+xml',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   '.gif': 'image/gif',
   '.ttf': 'font/ttf'
 };
@@ -186,6 +189,15 @@ const server = http.createServer(async (req, res) => {
     if (path === '/api/pharmacy/profile' && req.method === 'GET') return send(await ownPharmacy(db, await session(req)));
     if (path === '/api/pharmacy/products' && req.method === 'GET') return send(await pharmacyProducts(db, await session(req)));
     if (path === '/api/pharmacy/products' && req.method === 'POST') return send(await saveProduct(db, await session(req), await readBody(req)), 201);
+    const sheetAction = path.match(/^\/api\/pharmacy\/products\/import\/(preview|confirm)$/);
+    if (sheetAction && req.method === 'POST') {
+      const user = await session(req);
+      ensure(user.role === 'pharmacy', 'هذه الخدمة للصيدليات فقط', 403);
+      return send(await importProducts(db,user,await readWorkbookBody(req),sheetAction[1]==='confirm'));
+    }
+    const photoProduct = path.match(/^\/api\/pharmacy\/products\/([A-Za-z0-9-]+)\/photo$/);
+    if (photoProduct && req.method === 'PATCH')
+      return send(await saveProductPhoto(db,await session(req),photoProduct[1],(await readBody(req)).imageData));
     const ownProduct = path.match(/^\/api\/pharmacy\/products\/([A-Za-z0-9-]+)$/);
     if (ownProduct && req.method === 'PATCH') return send(await saveProduct(db, await session(req), await readBody(req), ownProduct[1]));
     if (path === '/api/admin/captains') {

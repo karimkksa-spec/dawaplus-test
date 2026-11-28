@@ -1,0 +1,15 @@
+.sheet-import { margin-block: 12px; }
+.sheet-panel { display: grid; grid-template-columns: minmax(0,1fr); gap: 12px; margin-block-start: 10px; padding: 16px; border: 1px solid #c8dfdd; border-radius: 12px; background: white; }
+.sheet-panel p, .sheet-photo p { margin: 0; }
+.sheet-panel > a, .sheet-panel > button { justify-self: start; }
+.sheet-panel > a { color: #006c70; display: inline-flex; align-items: center; gap: 6px; font-weight: 700; }
+.sheet-panel label:not(.check-label), .sheet-photo label { display: grid; gap: 6px; }
+.sheet-panel input[type=file], .sheet-photo input[type=file] { max-width: 100%; min-width: 0; }
+.sheet-table { max-height: 23rem; overflow: auto; }
+.sheet-table td small { display: block; }
+.sheet-status-invalid { color: #a52819; }
+.sheet-status-new { color: #06645b; }
+.sheet-photo { position: fixed; inset: 0; margin: auto; height: fit-content; max-height: 85dvh; max-width: min(92vw, 450px); border: 0; padding: 20px; }
+.sheet-photo[open] { display: grid; gap: 12px; }
+.sheet-photo::backdrop { background: rgb(0 26 28 / 55%); }
+.sheet-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
